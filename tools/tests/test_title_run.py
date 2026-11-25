@@ -1478,7 +1478,7 @@ class PadTests(unittest.TestCase):
         self.work = Path(directory.name) / "work"
         self.work.mkdir()
         self.run_index = 0
-        environment = unittest.mock.patch.dict(os.environ)
+        environment = unittest.mock.patch.object(os, "environ", dict(os.environ))
         environment.start()
         self.addCleanup(environment.stop)
         os.environ.pop("APS5_PAD_RECORD", None)
@@ -1536,7 +1536,7 @@ class PadTests(unittest.TestCase):
         self.assertIsNotNone(result["pad_queued_s"])
 
     def test_no_pad_leaves_the_input_file_alone(self):
-        with unittest.mock.patch.dict(os.environ, {"APS5_PAD_INPUT_FILE": str(self.work / "outside.txt")}):
+        with unittest.mock.patch.object(os, "environ", {**os.environ, "APS5_PAD_INPUT_FILE": str(self.work / "outside.txt")}):
             result, env = self.run_with(None)
         self.assertNotIn("APS5_PAD_INPUT_FILE", env)
         self.assertNotIn("pad_queued_s", result)
@@ -1594,13 +1594,13 @@ class PadTests(unittest.TestCase):
         self.assertIsNotNone(result["pad_queued_s"])
 
     def test_default_audio_driver_is_dummy(self):
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+        with unittest.mock.patch.object(os, "environ", dict(os.environ)):
             os.environ.pop("SDL_AUDIODRIVER", None)
             _, env = self.run_with(None)
         self.assertEqual(env["SDL_AUDIODRIVER"], "dummy")
 
     def test_inherited_audio_driver_is_preserved(self):
-        with unittest.mock.patch.dict(os.environ, {"SDL_AUDIODRIVER": "wasapi"}):
+        with unittest.mock.patch.object(os, "environ", {**os.environ, "SDL_AUDIODRIVER": "wasapi"}):
             _, env = self.run_with(None)
         self.assertEqual(env["SDL_AUDIODRIVER"], "wasapi")
 

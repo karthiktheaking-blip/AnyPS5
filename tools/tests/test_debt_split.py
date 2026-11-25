@@ -521,7 +521,13 @@ class DebtSplitTests(unittest.TestCase):
 
     def test_main_reports_non_git_repository(self):
         with tempfile.TemporaryDirectory() as empty_dir:
-            with patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(Path(empty_dir).parent)}):
+            environment = {**os.environ, "GIT_CEILING_DIRECTORIES": str(Path(empty_dir).parent)}
+            run = subprocess.run
+
+            def run_with_environment(*args, **kwargs):
+                return run(*args, env=environment, **kwargs)
+
+            with patch.object(debt_split.subprocess, "run", side_effect=run_with_environment):
                 with patch("pathlib.Path.cwd", return_value=Path(empty_dir)):
                     with patch("sys.stderr", new_callable=io.StringIO) as stderr:
                         with self.assertRaises(SystemExit) as cm:

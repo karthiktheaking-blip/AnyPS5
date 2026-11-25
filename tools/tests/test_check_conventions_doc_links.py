@@ -220,8 +220,8 @@ class RemovedDocLinkGitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             summary = Path(directory) / "summary.md"
             event = Path(directory) / "event.json"
-            with patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_PATH": str(event),
-                                         "GITHUB_STEP_SUMMARY": str(summary)}):
+            with patch.object(os, "environ", {**os.environ, "GITHUB_ACTIONS": "true", "GITHUB_EVENT_PATH": str(event),
+                                              "GITHUB_STEP_SUMMARY": str(summary)}):
                 base = {"README.md": "See [guide](docs/user/old/).\n", "docs/user/old/guide.md": "Guide\n"}
                 result = self.check_revision(base, {"docs/user/old/guide.md": None})
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
