@@ -336,6 +336,37 @@ class PrepareFailureCleanupTests(ReleaseNotesCase):
             prepare_release_notes.prepare_notes(self.source, self.body, self.full)
         self.assertOutputsKept()
 
+    def test_interrupted_promotion_restores_the_complete_previous_output_set(self):
+        self.write_source(json.dumps({"body": "## New Contributors\n* a\n"}))
+        replace = os.replace
+        for existing in (False, True):
+            for failure_at in range(1, 5 if existing else 3):
+                for after in (False, True):
+                    with self.subTest(existing=existing, failure_at=failure_at, after=after):
+                        output = self.out / f"{existing}-{failure_at}-{after}"
+                        output.mkdir()
+                        body, full = output / "body.md", output / "full.md"
+                        (output / "unrelated.txt").write_bytes(b"keep this file")
+                        for path, previous in ((body, b"previous body"), (full, b"previous full")):
+                            if existing:
+                                path.write_bytes(previous)
+                        previous = {path.name: path.read_bytes() for path in output.iterdir()}
+                        calls = 0
+
+                        def interrupt(source, destination):
+                            nonlocal calls
+                            calls += 1
+                            if calls == failure_at:
+                                if after:
+                                    replace(source, destination)
+                                raise KeyboardInterrupt("controlled interruption")
+                            return replace(source, destination)
+
+                        with patch.object(prepare_release_notes.os, "replace", side_effect=interrupt), \
+                                self.assertRaisesRegex(KeyboardInterrupt, "controlled interruption"):
+                            prepare_release_notes.prepare_notes(self.source, body, full)
+                        self.assertEqual({path.name: path.read_bytes() for path in output.iterdir()}, previous)
+
 
 class ReleaseBodyTests(unittest.TestCase):
     def test_notes_at_or_below_limit_are_returned_unchanged(self):
