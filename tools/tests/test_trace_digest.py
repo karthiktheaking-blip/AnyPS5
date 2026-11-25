@@ -1682,6 +1682,30 @@ class IntervalSchemaTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, r"summary\.jsonl:4:"):
                         trace_digest.load_intervals(self.path)
 
+    def test_interval_counter_maps_preserve_uint64_boundaries(self):
+        for field in ("owned_draw_counts", "graphics_track"):
+            with self.subTest(field=field):
+                record = interval_line(0, 1, 20, 1, **{field: {"zero": 0, "maximum": 2**64 - 1}})
+                self.write(record)
+                self.assertEqual(trace_digest.load_intervals(self.path), [record])
+
+    def test_oversized_interval_counters_are_rejected_before_rendering(self):
+        commands = ((trace_digest.__file__, []), (trace_digest.__file__, ["--json"]),
+                    (Path(trace_digest.__file__).with_name("trace_intervals_csv.py"), []))
+        for field in ("owned_draw_counts", "graphics_track"):
+            for value in (2**64, 10**400):
+                self.write(interval_line(0, 1, 20, 1, **{field: {"Graphics.Copy.bytes": value}}))
+                original = self.path.read_bytes()
+                for script, options in commands:
+                    with self.subTest(field=field, value=value, script=script, options=options):
+                        result = subprocess.run([sys.executable, str(script), str(self.path), *options],
+                                                capture_output=True, text=True, encoding="utf-8", timeout=10)
+                        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                        self.assertIn(f"summary.jsonl:4: {field}", result.stderr)
+                        self.assertEqual(result.stdout, "")
+                        self.assertNotIn("Traceback", result.stderr)
+                        self.assertEqual(self.path.read_bytes(), original)
+
     def test_invalid_identity_fields_are_rejected_before_interval_export(self):
         baseline = interval_line(0, 1, 20, 1)
         invalid = {

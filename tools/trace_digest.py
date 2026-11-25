@@ -564,12 +564,11 @@ def validate_interval(record):
             raise ValueError(f"{field} must be an object")
         for name, value in values.items():
             interval_number(value, f"{field}.{name}")
-    counts = record.get("owned_draw_counts", {})
-    if not isinstance(counts, dict) or any(not isinstance(name, str) or type(value) is not int or value < 0 for name, value in counts.items()):
-        raise ValueError("owned_draw_counts must map names to non-negative integers")
-    graphics = record.get("graphics_track", {})
-    if not isinstance(graphics, dict) or any(not isinstance(name, str) or type(value) is not int or value < 0 for name, value in graphics.items()):
-        raise ValueError("graphics_track must map names to non-negative integers")
+    for field in ("owned_draw_counts", "graphics_track"):
+        counts = record.get(field, {})
+        if not isinstance(counts, dict) or any(not isinstance(name, str) or type(value) is not int or not 0 <= value < 2**64
+                                               for name, value in counts.items()):
+            raise ValueError(f"{field} must map names to unsigned 64-bit integers")
     if "trace_dropped" in record and type(record["trace_dropped"]) is not bool:
         raise ValueError("trace_dropped must be a boolean")
     for field in INTERVAL_IDENTITY_STRINGS:
