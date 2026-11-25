@@ -65,7 +65,7 @@ class CheckCompilePreprocessorTests(unittest.TestCase):
                                          {flavor(str(path)) for path in (source,)})
 
     def test_dependency_only_arguments_are_removed(self):
-        source = Path("unit.c").resolve()
+        source = Path("unit.c").absolute().resolve()
         flags = ["-Wp,-MD,unit.d", "-Wp,-MMD,unit.d,-MP", "-Wp,-MF,unit.d,-MT,target,-MQ,quoted",
                  "-Wp,-MFunit.d,-MTtarget,-MQquoted", "-Wp,-M,-MM,-MG,-MP",
                  "-Wp,--write-dependencies,unit.d,--dependencies,--user-dependencies,--print-missing-file-dependencies",
@@ -76,7 +76,7 @@ class CheckCompilePreprocessorTests(unittest.TestCase):
                                  ["cc", "-fsyntax-only", str(source)])
 
     def test_other_preprocessor_arguments_are_preserved(self):
-        source = Path("unit.c").resolve()
+        source = Path("unit.c").absolute().resolve()
         for flag, expected in (("-Wp,-DNAME=value,-MD,unit.d,-I,include files", "-Wp,-DNAME=value,-I,include files"),
                                ("-Wp,-include,-MD,-MMD,unit.d", "-Wp,-include,-MD"),
                                ("-Wp,--include,-MD,--write-dependencies,unit.d", "-Wp,--include,-MD")):
@@ -85,7 +85,7 @@ class CheckCompilePreprocessorTests(unittest.TestCase):
                                  ["cc", "-fsyntax-only", expected, str(source)])
 
     def test_unsupported_options_and_response_operands_are_still_rejected(self):
-        source = Path("unit.c").resolve()
+        source = Path("unit.c").absolute().resolve()
         for flag in ("-Wp,-unknown-option", "-Wp,-MD,unit.d,-E", "-Wp,-MD,unit.d,-I,@operand.rsp",
                      "-Wp,-MD,@operand.rsp"):
             with self.subTest(flag=flag):
@@ -93,7 +93,7 @@ class CheckCompilePreprocessorTests(unittest.TestCase):
                     check_compile.syntax_arguments(["cc", flag, str(source)], Path.cwd(), source)
 
     def test_missing_dependency_values_are_rejected(self):
-        source = Path("unit.c").resolve()
+        source = Path("unit.c").absolute().resolve()
         for option in ("-MD", "-MMD", "-MF", "-MT", "-MQ", "--write-dependencies", "--write-user-dependencies"):
             with self.subTest(option=option):
                 with self.assertRaisesRegex(ValueError, "missing value"):

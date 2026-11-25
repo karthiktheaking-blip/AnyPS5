@@ -210,6 +210,42 @@ class WebReleaseTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), previous)
         self.assertEqual(list(self.build.glob(".web-release-*")), [])
 
+    def test_interrupted_directory_moves_restore_previous_output_and_allow_retry(self):
+        rename = build_web.rename
+        for existing in (False, True):
+            for operation in (("backup", "publish") if existing else ("publish",)):
+                for after in (False, True):
+                    with self.subTest(existing=existing, operation=operation, after=after):
+                        self.build = self.root / f"case-{existing}-{operation}-{after}"
+                        self.output = self.build / "web"
+                        if existing:
+                            self.seed_previous()
+                        previous = self.snapshot()
+                        self.requests.clear()
+                        interrupted = []
+
+                        def interrupt(source, target):
+                            selected = (source == self.output if operation == "backup"
+                                        else source.name == "site" and target == self.output)
+                            if selected and not interrupted:
+                                interrupted.append(source)
+                                if after:
+                                    rename(source, target)
+                                raise KeyboardInterrupt("publication interrupted")
+                            return rename(source, target)
+
+                        with patch.object(build_web, "rename", interrupt), \
+                                self.assertRaisesRegex(KeyboardInterrupt, "publication interrupted"):
+                            self.publish()
+                        self.assertEqual(len(interrupted), 1)
+                        self.assertEqual(self.output.exists(), existing)
+                        self.assertEqual(self.snapshot(), previous)
+                        self.assertEqual(list(self.build.glob(".web-release-*")), [])
+                        self.requests.clear()
+                        self.publish()
+                        self.assertEqual((self.output / "index.html").read_bytes(), self.contents["index.html"])
+                        self.assertEqual(list(self.build.glob(".web-release-*")), [])
+
     def test_publication_retries_a_briefly_locked_rename(self):
         self.seed_previous()
         rename = Path.rename
@@ -226,6 +262,40 @@ class WebReleaseTests(unittest.TestCase):
         self.assertEqual(len(blocked), 1)
         self.assertTrue((self.output / "web-release.json").is_file())
         self.assertEqual(list(self.build.glob(".web-release-*")), [])
+
+    def test_interrupted_publication_retains_recovery_data_if_rollback_is_blocked(self):
+        rename = build_web.rename
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                self.build = self.root / f"blocked-{existing}"
+                self.output = self.build / "web"
+                if existing:
+                    self.seed_previous()
+                previous = self.snapshot()
+                self.requests.clear()
+
+                def blocked_rollback(source, target):
+                    if source.name == "site" and target == self.output:
+                        rename(source, target)
+                        raise KeyboardInterrupt("publication interrupted")
+                    if source == self.output:
+                        if target.name == "site":
+                            raise PermissionError("rollback blocked")
+                    return rename(source, target)
+
+                with patch.object(build_web, "rename", blocked_rollback), \
+                        self.assertRaisesRegex(RuntimeError, "Could not (restore|roll back) release output") as error:
+                    self.publish()
+                self.assertEqual((self.output / "index.html").read_bytes(), self.contents["index.html"])
+                if existing:
+                    temporary, = self.build.glob(".web-release-*")
+                    backup = temporary / "previous"
+                    self.assertIn(str(backup), str(error.exception))
+                    self.assertEqual({path.relative_to(backup).as_posix(): path.read_bytes()
+                                      for path in backup.rglob("*") if path.is_file()}, previous)
+                else:
+                    self.assertIn(str(self.output), str(error.exception))
+                    self.assertEqual(list(self.build.glob(".web-release-*")), [])
 
     def test_failed_first_publication_leaves_no_output(self):
         self.output.rmdir()

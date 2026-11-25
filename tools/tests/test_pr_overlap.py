@@ -215,7 +215,14 @@ class FetchTests(unittest.TestCase):
                     "GIT_CONFIG_KEY_0": f"url.{remote.as_posix()}.insteadOf",
                     "GIT_CONFIG_VALUE_0": "https://github.com/owner/project.git",
                 }
-                with patch.object(pr_overlap, "REPO", "owner/project", create=True), patch.dict(os.environ, redirect):
+                environment = {**os.environ, **redirect}
+                original_run = subprocess.run
+
+                def run_with_environment(*args, **kwargs):
+                    return original_run(*args, env=environment, **kwargs)
+
+                with patch.object(pr_overlap, "REPO", "owner/project", create=True), \
+                        patch.object(pr_overlap.subprocess, "run", side_effect=run_with_environment):
                     with ThreadPoolExecutor(max_workers=2) as executor:
                         bases = list(executor.map(lambda requests: pr_overlap.fetch("main", requests), (prs, newer_prs)))
             finally:

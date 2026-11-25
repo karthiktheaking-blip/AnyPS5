@@ -240,13 +240,12 @@ def same_file(left, right):
 def write_outputs(outputs):
     staged = []
     backups = []
-    committed = []
     preserve = set()
     umask = os.umask(0)
     os.umask(umask)
     try:
         for filename, content in outputs:
-            path = Path(filename).resolve()
+            path = Path(os.path.realpath(filename))
             if path.is_dir():
                 raise IsADirectoryError(str(path))
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=path.parent, prefix=".stubgen-", suffix=".tmp", delete=False) as handle:
@@ -272,12 +271,13 @@ def write_outputs(outputs):
                 else:
                     backups.append((None, path))
         try:
-            for index, (temporary, path) in enumerate(staged):
+            for temporary, path in staged:
                 os.replace(temporary, path)
-                committed.append(index)
-        except OSError as error:
+        except BaseException as error:
             failures = []
-            for index in reversed(committed):
+            for index in reversed(range(len(backups))):
+                if staged[index][0].exists():
+                    continue
                 backup, path = backups[index]
                 try:
                     if backup is None:

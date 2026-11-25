@@ -277,18 +277,23 @@ def publish_release(output):
         manifest["revision"] = metadata["revision"]
         (staging / "release.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         (staging / ".nojekyll").touch()
-        if output.exists():
-            rename(output, previous)
         try:
+            if output.exists():
+                rename(output, previous)
             rename(staging, output)
-        except OSError:
-            if previous.exists():
-                try:
+            published = True
+        except BaseException:
+            published = False
+            try:
+                if not staging.exists() and output.exists():
+                    rename(output, staging)
+                if previous.exists():
                     rename(previous, output)
-                except OSError as error:
+            except OSError as error:
+                if previous.exists():
                     raise RuntimeError(f"Could not restore release output. Previous site is preserved at {previous}") from error
+                raise RuntimeError(f"Could not roll back release output at {output}") from error
             raise
-        published = True
     except (zipfile.BadZipFile, NotImplementedError) as error:
         raise ValueError(f"Invalid release archive {asset['name']}: {error}") from error
     finally:

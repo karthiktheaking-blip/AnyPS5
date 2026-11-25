@@ -1189,6 +1189,25 @@ class TraceDigestTests(unittest.TestCase):
         self.assertNotIn("a.prx+0x10", total)
         self.assertEqual(total, {"a.prx+0x20": 60.0, "a.prx+0x30": 40.0, "a.prx+0x40": 20.0})
 
+    def test_large_stack_counts_preserve_percentages_in_json_and_markdown(self):
+        for scale in (1, 10**307, 10**400):
+            self.stacks.write_text(f"root;work {2 * scale}\nroot;wait {scale}\n[truncated];work {scale}\n", encoding="utf-8")
+            for output in (("--json",), ()):
+                with self.subTest(digits=len(str(scale)), output=output):
+                    result = subprocess.run([sys.executable, trace_digest.__file__, str(self.trace),
+                                             "--stacks", str(self.stacks), *output],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    if output:
+                        stacks = json.loads(result.stdout)["stacks"]
+                        leaders = [{"frame": "work", "pct": 75.0}, {"frame": "wait", "pct": 25.0}]
+                        self.assertEqual(stacks, {"samples": 4 * scale, "truncated_pct": 25.0,
+                                                  "common_frames": 1, "self": leaders, "total": leaders})
+                    else:
+                        self.assertIn("25.0 % truncated", result.stdout)
+                        self.assertIn("- self: work 75.0 %, wait 25.0 %", result.stdout)
+                        self.assertIn("- total: work 75.0 %, wait 25.0 %", result.stdout)
+
     def test_tied_stack_leaders_are_stable_when_sample_rows_are_reordered(self):
         stacks = [(["root", "leaf-z"], 2), (["root", "leaf-a"], 2)]
         for entries in (stacks, list(reversed(stacks))):
@@ -1681,6 +1700,30 @@ class IntervalSchemaTests(unittest.TestCase):
                     self.write(record)
                     with self.assertRaisesRegex(ValueError, r"summary\.jsonl:4:"):
                         trace_digest.load_intervals(self.path)
+
+    def test_interval_counter_maps_preserve_uint64_boundaries(self):
+        for field in ("owned_draw_counts", "graphics_track"):
+            with self.subTest(field=field):
+                record = interval_line(0, 1, 20, 1, **{field: {"zero": 0, "maximum": 2**64 - 1}})
+                self.write(record)
+                self.assertEqual(trace_digest.load_intervals(self.path), [record])
+
+    def test_oversized_interval_counters_are_rejected_before_rendering(self):
+        commands = ((trace_digest.__file__, []), (trace_digest.__file__, ["--json"]),
+                    (Path(trace_digest.__file__).with_name("trace_intervals_csv.py"), []))
+        for field in ("owned_draw_counts", "graphics_track"):
+            for value in (2**64, 10**400):
+                self.write(interval_line(0, 1, 20, 1, **{field: {"Graphics.Copy.bytes": value}}))
+                original = self.path.read_bytes()
+                for script, options in commands:
+                    with self.subTest(field=field, value=value, script=script, options=options):
+                        result = subprocess.run([sys.executable, str(script), str(self.path), *options],
+                                                capture_output=True, text=True, encoding="utf-8", timeout=10)
+                        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                        self.assertIn(f"summary.jsonl:4: {field}", result.stderr)
+                        self.assertEqual(result.stdout, "")
+                        self.assertNotIn("Traceback", result.stderr)
+                        self.assertEqual(self.path.read_bytes(), original)
 
     def test_invalid_identity_fields_are_rejected_before_interval_export(self):
         baseline = interval_line(0, 1, 20, 1)

@@ -995,9 +995,16 @@ class FocusedInputEdgeTests(unittest.TestCase):
 
 class GitFailureAndExitTests(unittest.TestCase):
     def test_git_failure_raises_with_stderr_or_command_fallback(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"LC_ALL": "C", "GIT_CEILING_DIRECTORIES": str(Path(directory).parent)}):
-            with self.assertRaisesRegex(RuntimeError, "not a git repository"):
-                performance_bisect.git(directory, "status")
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {**os.environ, "LC_ALL": "C", "GIT_CEILING_DIRECTORIES": str(Path(directory).parent)}
+            run = subprocess.run
+
+            def run_with_environment(*args, **kwargs):
+                return run(*args, env=environment, **kwargs)
+
+            with patch.object(performance_bisect.subprocess, "run", side_effect=run_with_environment):
+                with self.assertRaisesRegex(RuntimeError, "not a git repository"):
+                    performance_bisect.git(directory, "status")
             failed = subprocess.CompletedProcess([], 1, stdout="", stderr="")
             with patch.object(performance_bisect.subprocess, "run", return_value=failed):
                 with self.assertRaisesRegex(RuntimeError, "git log -1 failed"):
