@@ -108,6 +108,27 @@ class KnownTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 library_oracle.load_known(path)
 
+    def test_duplicate_known_cases_are_rejected_instead_of_overriding_expectations(self):
+        for second in ("diff\tduplicate reason", "skip\thides the failure"):
+            with self.subTest(second=second), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "known.tsv"
+                original = f"# known failures\ncase-a\tdiff\toriginal reason\n\ncase-a\t{second}\n".encode("utf-8")
+                path.write_bytes(original)
+                with self.assertRaisesRegex(SystemExit, r"known\.tsv:4: duplicate case"):
+                    library_oracle.load_known(path)
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_duplicate_known_cases_stop_the_cli_before_fetch_or_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known.tsv"
+            path.write_text("case-a\tdiff\toriginal\ncase-a\tskip\tduplicate\n", encoding="utf-8")
+            with mock.patch.object(library_oracle, "fetch") as fetch, \
+                    mock.patch.object(library_oracle, "replay") as replay, \
+                    self.assertRaisesRegex(SystemExit, r"known\.tsv:2: duplicate case"):
+                library_oracle.main(["rtc", "--known", str(path), "--replay", "unused", "--write-known"])
+            fetch.assert_not_called()
+            replay.assert_not_called()
+
     def test_write_known_after_one_family_preserves_unrun_findings(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "known.tsv"
