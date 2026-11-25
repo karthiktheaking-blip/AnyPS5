@@ -246,7 +246,7 @@ def write_outputs(outputs):
     os.umask(umask)
     try:
         for filename, content in outputs:
-            path = Path(filename).resolve()
+            path = Path(os.path.realpath(filename))
             if path.is_dir():
                 raise IsADirectoryError(str(path))
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=path.parent, prefix=".stubgen-", suffix=".tmp", delete=False) as handle:
