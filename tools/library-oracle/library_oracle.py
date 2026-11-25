@@ -1,6 +1,8 @@
 import argparse
 import hashlib
 import os
+import secrets
+import stat
 import subprocess
 import sys
 import urllib.request
@@ -65,8 +67,27 @@ def write_known(path, known, findings, ran_cases):
     for case, (kind, _) in findings.items():
         rows[case] = (kind, known.get(case, (kind, ""))[1])
     lines = [f"{case}\t{kind}\t{reason}".rstrip("\t") for case, (kind, reason) in sorted(rows.items())]
-    with path.open("w", encoding="utf-8", newline="\n") as output:
-        output.write("".join(line + "\n" for line in lines))
+    target = Path(os.path.realpath(path))
+    try:
+        metadata = target.stat()
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None and not stat.S_ISREG(metadata.st_mode):
+        raise OSError(f"Known file must be a regular file: {path}")
+    if metadata is not None and os.name == "nt" and metadata.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
+        raise PermissionError(f"Known file is read-only: {path}")
+    temporary = None
+    try:
+        candidate = target.parent / (".oracle-known-" + secrets.token_hex(16))
+        with candidate.open("x", encoding="utf-8", newline="\n") as output:
+            temporary = candidate
+            output.write("".join(line + "\n" for line in lines))
+        if metadata is not None:
+            temporary.chmod(stat.S_IMODE(metadata.st_mode))
+        temporary.replace(target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def text(value):

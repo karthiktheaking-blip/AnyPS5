@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -135,6 +136,90 @@ class KnownTests(unittest.TestCase):
             known = {"unrun": ("crash", "reason"), "skip": ("skip", "environment")}
             library_oracle.write_known(path, known, {}, set())
             self.assertEqual(library_oracle.load_known(path), known)
+
+    def test_failed_known_write_preserves_previous_bytes_or_absence(self):
+        real_open = Path.open
+        for existing in (False, True):
+            for failure in (OSError("controlled disk failure"), KeyboardInterrupt("controlled interruption")):
+                with self.subTest(existing=existing, failure=type(failure).__name__), tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "known.tsv"
+                    previous = b"old\tdiff\tkeep reason\n" if existing else None
+                    if existing:
+                        path.write_bytes(previous)
+
+                    class FailingWriter:
+                        def __init__(self, stream):
+                            self.stream = stream
+
+                        def __enter__(self):
+                            return self
+
+                        def __exit__(self, *args):
+                            return self.stream.__exit__(*args)
+
+                        def write(self, text):
+                            self.stream.write(text[:3])
+                            self.stream.flush()
+                            raise failure
+
+                    def open_writer(file, mode="r", *args, **kwargs):
+                        stream = real_open(file, mode, *args, **kwargs)
+                        return FailingWriter(stream) if "w" in mode or "x" in mode else stream
+
+                    with mock.patch.object(Path, "open", open_writer), self.assertRaises(type(failure)):
+                        library_oracle.write_known(path, {}, {"new": ("diff", "")}, {"new"})
+                    self.assertEqual(path.read_bytes() if path.exists() else None, previous)
+                    self.assertEqual(list(Path(directory).iterdir()), [path] if existing else [])
+
+    def test_refused_known_replacement_preserves_previous_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known.tsv"
+            previous = b"old\tdiff\tkeep reason\n"
+            path.write_bytes(previous)
+            with mock.patch.object(Path, "replace", side_effect=PermissionError("replacement refused")), \
+                    self.assertRaisesRegex(PermissionError, "replacement refused"):
+                library_oracle.write_known(path, {}, {"new": ("diff", "")}, {"new"})
+            self.assertEqual(path.read_bytes(), previous)
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    @unittest.skipUnless(os.name == "nt", "Windows read-only file semantics")
+    def test_read_only_known_file_is_retained_without_staging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known.tsv"
+            previous = b"old\tdiff\tkeep reason\n"
+            path.write_bytes(previous)
+            path.chmod(0o400)
+            try:
+                with self.assertRaises(PermissionError):
+                    library_oracle.write_known(path, {}, {"new": ("diff", "")}, {"new"})
+                self.assertEqual(path.read_bytes(), previous)
+                self.assertEqual(list(Path(directory).iterdir()), [path])
+            finally:
+                path.chmod(0o600)
+
+    def test_known_update_follows_the_existing_symbolic_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "actual.tsv"
+            target.write_bytes(b"old\tdiff\n")
+            link = Path(directory) / "known.tsv"
+            try:
+                link.symlink_to(target.name)
+            except OSError as error:
+                if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                    self.skipTest("Windows symbolic-link privileges unavailable")
+                raise
+            library_oracle.write_known(link, {}, {"new": ("diff", "")}, {"new"})
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(target.read_bytes(), b"new\tdiff\n")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permission mode semantics")
+    def test_known_update_preserves_existing_permission_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known.tsv"
+            path.write_bytes(b"old\tdiff\n")
+            path.chmod(0o640)
+            library_oracle.write_known(path, {}, {"new": ("diff", "")}, {"new"})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
 
     def test_the_committed_known_file_parses(self):
         known = library_oracle.load_known(library_oracle.HERE / "known.tsv")
