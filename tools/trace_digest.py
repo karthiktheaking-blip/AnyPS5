@@ -421,7 +421,7 @@ def digest(trace, summary=None, stacks=None, worst=5, top=10):
         common = common or set()
         for frame in common:
             del inclusive[frame]
-        share = lambda value: 100.0 * value / samples if samples else 0.0
+        share = lambda value: 100.0 * (value / samples) if samples else 0.0
         result["stacks"] = {"samples": samples, "truncated_pct": share(truncated), "common_frames": len(common),
                             "self": [{"frame": frame, "pct": share(value)} for frame, value in heapq.nsmallest(top, own.items(), key=metric_rank)],
                             "total": [{"frame": frame, "pct": share(value)} for frame, value in heapq.nsmallest(top, inclusive.items(), key=metric_rank)]}

@@ -1189,6 +1189,25 @@ class TraceDigestTests(unittest.TestCase):
         self.assertNotIn("a.prx+0x10", total)
         self.assertEqual(total, {"a.prx+0x20": 60.0, "a.prx+0x30": 40.0, "a.prx+0x40": 20.0})
 
+    def test_large_stack_counts_preserve_percentages_in_json_and_markdown(self):
+        for scale in (1, 10**307, 10**400):
+            self.stacks.write_text(f"root;work {2 * scale}\nroot;wait {scale}\n[truncated];work {scale}\n", encoding="utf-8")
+            for output in (("--json",), ()):
+                with self.subTest(digits=len(str(scale)), output=output):
+                    result = subprocess.run([sys.executable, trace_digest.__file__, str(self.trace),
+                                             "--stacks", str(self.stacks), *output],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    if output:
+                        stacks = json.loads(result.stdout)["stacks"]
+                        leaders = [{"frame": "work", "pct": 75.0}, {"frame": "wait", "pct": 25.0}]
+                        self.assertEqual(stacks, {"samples": 4 * scale, "truncated_pct": 25.0,
+                                                  "common_frames": 1, "self": leaders, "total": leaders})
+                    else:
+                        self.assertIn("25.0 % truncated", result.stdout)
+                        self.assertIn("- self: work 75.0 %, wait 25.0 %", result.stdout)
+                        self.assertIn("- total: work 75.0 %, wait 25.0 %", result.stdout)
+
     def test_tied_stack_leaders_are_stable_when_sample_rows_are_reordered(self):
         stacks = [(["root", "leaf-z"], 2), (["root", "leaf-a"], 2)]
         for entries in (stacks, list(reversed(stacks))):
