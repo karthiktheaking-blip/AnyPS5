@@ -271,6 +271,42 @@ class StubGeneratorTests(unittest.TestCase):
 
 
 class ReadOnlyOutputTests(unittest.TestCase):
+    def test_interrupted_pair_restores_each_existing_or_absent_output_and_allows_retry(self):
+        replace = os.replace
+        for first_exists in (False, True):
+            for second_exists in (False, True):
+                for selected in (0, 1):
+                    for after in (False, True):
+                        with self.subTest(first=first_exists, second=second_exists, selected=selected, after=after), \
+                                tempfile.TemporaryDirectory() as directory:
+                            root = Path(directory).resolve()
+                            paths = [root / "Export.cpp", root / "debt.md"]
+                            originals = [b"old code\n" if first_exists else None, b"old debt\n" if second_exists else None]
+                            for path, original in zip(paths, originals):
+                                if original is not None:
+                                    path.write_bytes(original)
+                            interrupted = []
+
+                            def interrupt(source, destination):
+                                if Path(destination) == paths[selected] and not interrupted:
+                                    interrupted.append(source)
+                                    if after:
+                                        replace(source, destination)
+                                    raise KeyboardInterrupt("pair write interrupted")
+                                return replace(source, destination)
+
+                            outputs = list(zip(paths, ("new code\n", "new debt\n")))
+                            with patch.object(os, "replace", interrupt), \
+                                    self.assertRaisesRegex(KeyboardInterrupt, "pair write interrupted"):
+                                stubgen.write_outputs(outputs)
+                            self.assertEqual(len(interrupted), 1)
+                            for path, original in zip(paths, originals):
+                                self.assertEqual(path.read_bytes() if path.exists() else None, original)
+                            self.assertEqual(list(root.glob(".stubgen-*")), [])
+                            stubgen.write_outputs(outputs)
+                            self.assertEqual([path.read_bytes() for path in paths], [b"new code\n", b"new debt\n"])
+                            self.assertEqual(list(root.glob(".stubgen-*")), [])
+
     @unittest.skipUnless(os.name == "nt", "Windows sharing locks prevent replacing open files")
     def test_windows_second_output_sharing_lock_restores_first(self):
         import ctypes
