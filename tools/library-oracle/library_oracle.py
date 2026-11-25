@@ -51,8 +51,14 @@ def fetch(family, cache, opener=urllib.request.urlopen):
 def load_known(path):
     known = {}
     if not path.is_file():
+        if path.exists():
+            raise SystemExit(f"{path}: known file must be a regular file")
         return known
-    for number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise SystemExit(f"{path}: cannot read known file: {error}") from error
+    for number, line in enumerate(lines, 1):
         if not line.strip() or line.startswith("#"):
             continue
         fields = line.split("\t")

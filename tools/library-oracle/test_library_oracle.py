@@ -129,6 +129,49 @@ class KnownTests(unittest.TestCase):
             fetch.assert_not_called()
             replay.assert_not_called()
 
+    def test_known_directory_is_rejected_before_fetch_or_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known.tsv"
+            path.mkdir()
+            marker = path / "keep.txt"
+            marker.write_bytes(b"unrelated")
+            with mock.patch.object(library_oracle, "fetch") as fetch, \
+                    mock.patch.object(library_oracle, "replay") as replay, \
+                    self.assertRaisesRegex(SystemExit, "known file must be a regular file"):
+                library_oracle.main(["rtc", "--known", str(path), "--replay", "unused"])
+            fetch.assert_not_called()
+            replay.assert_not_called()
+            self.assertEqual(marker.read_bytes(), b"unrelated")
+
+    def test_invalid_known_encoding_is_a_cli_error_without_a_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known.tsv"
+            original = b"case\tdiff\treason \xff\n"
+            path.write_bytes(original)
+            result = subprocess.run([sys.executable, library_oracle.__file__, "rtc", "--known", str(path),
+                                     "--replay", "unused"], capture_output=True, text=True, encoding="utf-8", timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertIn(str(path), result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_absent_known_file_keeps_bootstrap_behavior(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.tsv"
+            self.assertEqual(library_oracle.load_known(path), {})
+            self.assertFalse(path.exists())
+
+    def test_known_read_failure_identifies_the_input_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known.tsv"
+            original = b"case\tdiff\treason\n"
+            path.write_bytes(original)
+            with mock.patch.object(Path, "read_text", side_effect=PermissionError("controlled read refusal")), \
+                    self.assertRaisesRegex(SystemExit, r"known\.tsv: cannot read known file: controlled read refusal"):
+                library_oracle.load_known(path)
+            self.assertEqual(path.read_bytes(), original)
+
     def test_write_known_after_one_family_preserves_unrun_findings(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "known.tsv"
